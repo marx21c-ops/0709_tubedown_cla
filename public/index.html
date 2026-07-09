@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video Downloader</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #16181d;
+        --muted: #6b7280;
+        --border: #e2e5ea;
+        --accent: #2563eb;
+        --err: #dc2626;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #101215;
+          --fg: #e8eaed;
+          --muted: #9aa1ab;
+          --border: #2a2e35;
+          --accent: #60a5fa;
+          --err: #f87171;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 3rem 1rem;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 40rem; margin: 0 auto; }
+      h1 { font-size: 1.35rem; margin: 0 0 .35rem; }
+      p.sub { color: var(--muted); margin: 0 0 2rem; font-size: .9rem; }
+      form { display: flex; flex-direction: column; gap: .75rem; }
+      input, select, button {
+        font: inherit;
+        padding: .65rem .75rem;
+        border-radius: .5rem;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--fg);
+      }
+      input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+      button {
+        background: var(--accent);
+        border-color: transparent;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled { opacity: .55; cursor: not-allowed; }
+      #panel { margin-top: 2rem; display: none; }
+      #panel.show { display: block; }
+      .bar { height: .5rem; background: var(--border); border-radius: 999px; overflow: hidden; }
+      .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+      .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: .82rem; margin-top: .5rem; }
+      .title { font-weight: 600; margin-bottom: .6rem; word-break: break-word; }
+      .err { color: var(--err); }
+      a.dl {
+        display: inline-block; margin-top: 1rem; padding: .6rem 1rem;
+        background: var(--accent); color: #fff; border-radius: .5rem;
+        text-decoration: none; font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Video Downloader</h1>
+      <p class="sub">YouTube · TikTok · Vimeo · SoundCloud 외. 고화질은 영상/음성 스트림을 받아 ffmpeg으로 병합합니다.</p>
+
+      <form id="form">
+        <input id="url" type="url" required placeholder="https://youtube.com/watch?v=..." autocomplete="off" />
+        <select id="quality"></select>
+        <button id="submit" type="submit">다운로드</button>
+      </form>
+
+      <section id="panel">
+        <div class="title" id="title">대기 중…</div>
+        <div class="bar"><i id="fill"></i></div>
+        <div class="meta"><span id="left">—</span><span id="right"></span></div>
+        <div id="done"></div>
+      </section>
+    </main>
+
+    <script type="module">
+      const $ = (id) => document.getElementById(id);
+      const fmtBytes = (n) => {
+        if (!n) return '—';
+        const u = ['B', 'KB', 'MB', 'GB'];
+        let i = 0;
+        while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+        return `${n.toFixed(1)} ${u[i]}`;
+      };
+      const fmtEta = (s) => (s == null ? '' : `${Math.floor(s / 60)}분 ${s % 60}초 남음`);
+
+      const qualities = await (await fetch('/api/qualities')).json();
+      $('quality').innerHTML = qualities
+        .map((q) => `<option value="${q.value}">${q.label}</option>`)
+        .join('');
+
+      let source;
+
+      $('form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        source?.close();
+        $('submit').disabled = true;
+        $('done').innerHTML = '';
+        $('fill').style.width = '0';
+        $('title').textContent = '대기열에 추가 중…';
+        $('left').textContent = '—';
+        $('right').textContent = '';
+        $('panel').classList.add('show');
+
+        const res = await fetch('/api/jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: $('url').value, quality: $('quality').value }),
+        });
+        const body = await res.json();
+
+        if (!res.ok) {
+          $('title').innerHTML = `<span class="err">${body.error}</span>`;
+          $('submit').disabled = false;
+          return;
+        }
+
+        $('title').textContent = '다운로드 중…';
+        track(body.jobId);
+      });
+
+      function track(jobId) {
+        source = new EventSource(`/api/jobs/${jobId}/events`);
+
+        source.addEventListener('progress', (e) => {
+          const p = JSON.parse(e.data);
+          if (p.percent != null) $('fill').style.width = `${p.percent}%`;
+          $('left').textContent = `${fmtBytes(p.downloadedBytes)} / ${fmtBytes(p.totalBytes)}`;
+          const speed = p.speedBps ? `${fmtBytes(p.speedBps)}/s` : '';
+          $('right').textContent = [speed, fmtEta(p.etaSeconds)].filter(Boolean).join(' · ');
+        });
+
+        source.addEventListener('completed', async () => {
+          source.close();
+          const job = await (await fetch(`/api/jobs/${jobId}`)).json();
+          $('fill').style.width = '100%';
+          $('title').textContent = job.result?.title ?? '완료';
+          $('left').textContent = fmtBytes(job.result?.bytes);
+          $('right').textContent = '완료';
+          $('done').innerHTML = `<a class="dl" href="${job.result.downloadUrl}">파일 저장</a>`;
+          $('submit').disabled = false;
+        });
+
+        source.addEventListener('failed', (e) => {
+          source.close();
+          $('title').innerHTML = `<span class="err">${JSON.parse(e.data).error}</span>`;
+          $('submit').disabled = false;
+        });
+      }
+    </script>
+  </body>
+</html>

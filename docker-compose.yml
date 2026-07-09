@@ -1,0 +1,54 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      retries: 10
+
+  # Mints the Proof-of-Origin tokens YouTube demands. Without this, expect
+  # HTTP 403 or silently downgraded formats.
+  bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: node src/server.js
+    ports:
+      - '3000:3000'
+    environment:
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - downloads:/app/downloads
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: node src/worker.js
+    environment:
+      REDIS_URL: redis://redis:6379
+      POT_PROVIDER_URL: http://bgutil:4416
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - downloads:/app/downloads
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Scale this, not the API. `docker compose up --scale worker=4`
+    deploy:
+      replicas: 1
+
+volumes:
+  redis-data:
+  downloads:
