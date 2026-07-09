@@ -2,3 +2,5 @@ node_modules
 downloads
 .env
 cookies.txt
+.railway
+.railway-config-pull-*
