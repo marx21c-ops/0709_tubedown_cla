@@ -31,4 +31,5 @@ ENV NODE_ENV=production \
     DOWNLOAD_DIR=/app/downloads
 
 EXPOSE 3000
-CMD ["node", "src/server.js"]
+# ROLE=worker runs the queue consumer; anything else runs the API.
+CMD ["node", "src/start.js"]

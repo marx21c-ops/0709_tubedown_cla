@@ -105,14 +105,17 @@ Railway는 **서비스 간 볼륨 공유를 지원하지 않습니다.** api와 
 
 서비스 4개로 구성합니다.
 
-| 서비스 | 소스 | 설정 파일 |
-|---|---|---|
-| `redis` | Railway Redis 데이터베이스 | — |
-| `bgutil` | 도커 이미지 `brainicism/bgutil-ytdlp-pot-provider` | — |
-| `api` | 이 저장소 | `railway.json` |
-| `worker` | 이 저장소 | `railway.worker.json` |
+| 서비스 | 소스 |
+|---|---|
+| `Redis` | Railway Redis 데이터베이스 |
+| `bgutil` | 도커 이미지 `brainicism/bgutil-ytdlp-pot-provider` |
+| `api` | 이 저장소 |
+| `worker` | 이 저장소 (`ROLE=worker`) |
 
-`api`/`worker` 서비스의 Config-as-code 경로를 각각 위 파일로 지정하세요.
+`api`와 `worker`는 같은 이미지·같은 `railway.json`을 씁니다. Railway는 저장소 루트의
+`railway.json`을 그 저장소로 빌드하는 **모든** 서비스에 적용하므로, 서비스별 설정 파일을
+따로 두는 대신 `src/start.js`가 `ROLE` 환경변수로 역할을 정합니다. `ROLE=worker`면 큐
+컨슈머를 띄우고 헬스체크용 `/healthz`만 노출합니다.
 
 ### 환경 변수
 
@@ -130,6 +133,7 @@ S3_REGION=auto
 `worker`만 추가:
 
 ```
+ROLE=worker
 POT_PROVIDER_URL=http://bgutil.railway.internal:4416
 PROXY_URL=            # 아래 참고
 ```
